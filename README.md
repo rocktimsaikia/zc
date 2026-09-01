@@ -10,8 +10,11 @@ commits on confirmation. No dependencies beyond Zig's standard library.
 curl -fsSL https://raw.githubusercontent.com/rocktimsaikia/zc/main/install.sh | sh
 ```
 
-Needs [Zig 0.14.1](https://ziglang.org/download/). Installs to `~/.local/bin`,
-override with `PREFIX`.
+Prebuilt binary, no toolchain needed. Installs to `~/.local/bin`, override
+with `PREFIX`. Linux and macOS, x86_64 and arm64. Windows: grab the `.zip` from
+[releases](https://github.com/rocktimsaikia/zc/releases).
+
+From source instead: `zig build -Doptimize=ReleaseSafe --prefix ~/.local` (Zig 0.14.1).
 
 ## Setup
 

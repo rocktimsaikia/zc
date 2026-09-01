@@ -1,0 +1,55 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      # Zig cross-compiles every target from this one runner, so no OS matrix.
+      # -Dcpu=baseline keeps the binaries portable across CPU generations and
+      # is required for the aarch64 targets on Zig 0.14.1.
+      - name: build
+        run: |
+          set -eu
+          mkdir -p dist
+          for spec in \
+            "x86_64-linux-musl:x86_64-linux:tar" \
+            "aarch64-linux-musl:aarch64-linux:tar" \
+            "x86_64-macos:x86_64-macos:tar" \
+            "aarch64-macos:aarch64-macos:tar" \
+            "x86_64-windows:x86_64-windows:zip"
+          do
+            target=${spec%%:*}; rest=${spec#*:}; name=${rest%%:*}; ext=${rest##*:}
+            zig build -Dtarget="$target" -Dcpu=baseline -Doptimize=ReleaseSafe \
+              --prefix "out/$name"
+            # Guard against shipping an empty archive if a build silently no-ops.
+            if [ "$ext" = zip ]; then
+              test -s "out/$name/bin/zc.exe"
+            else
+              test -s "out/$name/bin/zc"
+            fi
+            if [ "$ext" = zip ]; then
+              (cd "out/$name/bin" && zip -q "$GITHUB_WORKSPACE/dist/zc-$name.zip" zc.exe)
+            else
+              tar -czf "dist/zc-$name.tar.gz" -C "out/$name/bin" zc
+            fi
+          done
+          (cd dist && sha256sum ./* > SHA256SUMS)
+          ls -l dist
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
