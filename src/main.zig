@@ -127,6 +127,37 @@ pub fn main() !void {
     std.debug.print("{s}", .{try git(alloc, &.{ "git", "commit", "-m", message })});
 }
 
+// Minimal spinner on stderr, drawn from its own thread while a blocking call
+// runs. Silent when stderr is not a TTY, so piped output stays clean.
+const Spinner = struct {
+    thread: ?std.Thread = null,
+    stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+    const frames = [_][]const u8{ "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}" };
+
+    fn start(self: *Spinner, label: []const u8) void {
+        if (!std.io.getStdErr().isTty()) return;
+        self.thread = std.Thread.spawn(.{}, run, .{ self, label }) catch null;
+    }
+
+    fn done(self: *Spinner) void {
+        const thread = self.thread orelse return;
+        self.stop.store(true, .release);
+        thread.join();
+        self.thread = null;
+    }
+
+    fn run(self: *Spinner, label: []const u8) void {
+        const stderr = std.io.getStdErr().writer();
+        var i: usize = 0;
+        while (!self.stop.load(.acquire)) : (i += 1) {
+            stderr.print("\r{s} {s}", .{ frames[i % frames.len], label }) catch return;
+            std.time.sleep(80 * std.time.ns_per_ms);
+        }
+        stderr.print("\r\x1b[K", .{}) catch {}; // erase the line on the way out
+    }
+};
+
 // Run git and return its stdout. Failure is fatal and already reported, so
 // callers only ever see success. argv[1] is the subcommand, used in messages.
 fn git(alloc: std.mem.Allocator, argv: []const []const u8) ![]const u8 {
@@ -170,6 +201,11 @@ fn generate(alloc: std.mem.Allocator, api_key: []const u8, diff: []const u8) ![]
     defer client.deinit();
 
     var response = std.ArrayList(u8).init(alloc);
+
+    var spinner: Spinner = .{};
+    spinner.start("generating commit message");
+    errdefer spinner.done();
+
     const result = try client.fetch(.{
         .location = .{ .url = api_url },
         .method = .POST,
@@ -180,6 +216,8 @@ fn generate(alloc: std.mem.Allocator, api_key: []const u8, diff: []const u8) ![]
         },
         .response_storage = .{ .dynamic = &response },
     });
+
+    spinner.done();
 
     if (result.status != .ok) {
         std.debug.print("api returned {d}:\n{s}\n", .{ @intFromEnum(result.status), response.items });
