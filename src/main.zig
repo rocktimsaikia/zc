@@ -7,18 +7,47 @@ const max_diff_bytes = 10 * 1024 * 1024;
 const system_prompt =
     \\Write a git commit message for the staged diff.
     \\
-    \\Format: Conventional Commits.
-    \\  type(scope): description
-    \\  types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-    \\  scope is optional
-    \\  description is lowercase, imperative mood, no trailing period
-    \\  breaking change: append ! after type/scope, or add a BREAKING CHANGE: footer
+    \\Follow the Conventional Commits 1.0.0 specification exactly.
     \\
-    \\Keep the subject under 72 characters. Add a body only when the "why" is not
-    \\obvious from the diff; separate it with a blank line and wrap at 72 columns.
+    \\Structure:
+    \\  <type>[optional scope]: <description>
+    \\
+    \\  [optional body]
+    \\
+    \\  [optional footer(s)]
+    \\
+    \\Specification rules:
+    \\- A type is REQUIRED: a noun, then an OPTIONAL scope, an OPTIONAL !, then a
+    \\  terminal colon and one space.
+    \\- feat MUST be used when the commit adds a feature.
+    \\- fix MUST be used when the commit is a bug fix.
+    \\- Other types MAY be used: docs, style, refactor, perf, test, build, ci,
+    \\  chore, revert.
+    \\- A scope is OPTIONAL: a noun in parentheses naming a section of the
+    \\  codebase, e.g. fix(parser):
+    \\- The description MUST immediately follow the colon and space.
+    \\- A body is OPTIONAL and MUST begin one blank line after the description.
+    \\  It is free-form and MAY span multiple paragraphs.
+    \\- Footers are OPTIONAL and begin one blank line after the body. Each footer
+    \\  is a token, then ': ' or ' #', then a value. Tokens MUST use - instead of
+    \\  spaces, e.g. Reviewed-by. BREAKING CHANGE is the one exception.
+    \\- Breaking changes MUST be shown either as ! immediately before the colon in
+    \\  the prefix, or as a footer 'BREAKING CHANGE: <description>'. The text
+    \\  BREAKING CHANGE MUST be uppercase.
+    \\
+    \\Decide first whether the diff changes or removes existing public API or
+    \\behaviour: a changed signature, a renamed or deleted export, a new thrown
+    \\error, a different return value, a changed default. If it does, that is a
+    \\breaking change and you MUST mark it with ! before the colon, and add a
+    \\BREAKING CHANGE: footer saying what callers have to do differently.
+    \\
+    \\House style, on top of the spec:
+    \\- Description is lowercase, imperative mood, no trailing period.
+    \\- Keep the description under 72 characters.
+    \\- Add a body only when the reason for the change is not obvious from the
+    \\  diff. Wrap the body at 72 columns.
     \\
     \\Output only the commit message. No code fences, no preamble, no explanation.
-    \\
 ;
 
 const usage =
