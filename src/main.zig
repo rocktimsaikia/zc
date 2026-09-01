@@ -58,6 +58,7 @@ const usage =
     \\  -h, --help  show this help
     \\
     \\Reads the staged diff, proposes a commit message, and commits on confirmation.
+    \\Offers to stage tracked changes when nothing is staged.
     \\Requires OPENAI_API_KEY.
     \\
 ;
@@ -79,10 +80,26 @@ pub fn main() !void {
         return;
     }
 
-    const diff = try stagedDiff(alloc);
+    var diff = try git(alloc, &.{ "git", "diff", "--cached" });
     if (diff.len == 0) {
-        std.debug.print("nothing staged. `git add` something first.\n", .{});
-        return;
+        const unstaged = try git(alloc, &.{ "git", "diff", "--stat" });
+        if (unstaged.len == 0) {
+            std.debug.print("nothing to commit. stage changes with `git add`.\n", .{});
+            return;
+        }
+        std.debug.print("nothing staged, but tracked files have changed:\n\n{s}\n", .{unstaged});
+        if (!confirm("stage all tracked changes?")) {
+            std.debug.print("aborted\n", .{});
+            return;
+        }
+        // -u stages modifications and deletions of tracked files only; new
+        // files stay untracked, which is what the prompt above promised.
+        _ = try git(alloc, &.{ "git", "add", "-u" });
+        diff = try git(alloc, &.{ "git", "diff", "--cached" });
+        if (diff.len == 0) {
+            std.debug.print("nothing staged\n", .{});
+            return;
+        }
     }
 
     const api_key = std.process.getEnvVarOwned(alloc, "OPENAI_API_KEY") catch {
@@ -95,26 +112,28 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     try stdout.print("\n{s}\n\n", .{message});
 
-    if (!confirm()) {
+    if (!confirm("commit?")) {
         std.debug.print("aborted\n", .{});
         return;
     }
-    try commit(alloc, message);
+    std.debug.print("{s}", .{try git(alloc, &.{ "git", "commit", "-m", message })});
 }
 
-fn stagedDiff(alloc: std.mem.Allocator) ![]const u8 {
+// Run git and return its stdout. Failure is fatal and already reported, so
+// callers only ever see success. argv[1] is the subcommand, used in messages.
+fn git(alloc: std.mem.Allocator, argv: []const []const u8) ![]const u8 {
     const result = try std.process.Child.run(.{
         .allocator = alloc,
-        .argv = &.{ "git", "diff", "--cached" },
+        .argv = argv,
         .max_output_bytes = max_diff_bytes,
     });
     switch (result.term) {
         .Exited => |code| if (code != 0) {
-            std.debug.print("git diff failed: {s}\n", .{result.stderr});
+            std.debug.print("git {s} failed: {s}\n", .{ argv[1], result.stderr });
             std.process.exit(1);
         },
         else => {
-            std.debug.print("git diff was killed\n", .{});
+            std.debug.print("git {s} was killed\n", .{argv[1]});
             std.process.exit(1);
         },
     }
@@ -178,8 +197,8 @@ fn generate(alloc: std.mem.Allocator, api_key: []const u8, diff: []const u8) ![]
     std.process.exit(1);
 }
 
-fn confirm() bool {
-    std.debug.print("commit? [Y/n] ", .{});
+fn confirm(prompt: []const u8) bool {
+    std.debug.print("{s} [Y/n] ", .{prompt});
 
     var buf: [64]u8 = undefined;
     // `catch null` covers a stray paste longer than the buffer; `orelse` covers
@@ -190,22 +209,4 @@ fn confirm() bool {
     const answer = std.mem.trim(u8, line, " \t\r");
     if (answer.len == 0) return true; // bare Enter accepts
     return std.ascii.eqlIgnoreCase(answer, "y") or std.ascii.eqlIgnoreCase(answer, "yes");
-}
-
-fn commit(alloc: std.mem.Allocator, message: []const u8) !void {
-    const result = try std.process.Child.run(.{
-        .allocator = alloc,
-        .argv = &.{ "git", "commit", "-m", message },
-    });
-    switch (result.term) {
-        .Exited => |code| if (code != 0) {
-            std.debug.print("git commit failed: {s}\n", .{result.stderr});
-            std.process.exit(1);
-        },
-        else => {
-            std.debug.print("git commit was killed\n", .{});
-            std.process.exit(1);
-        },
-    }
-    std.debug.print("{s}", .{result.stdout});
 }
