@@ -58,7 +58,7 @@ const usage =
     \\  -h, --help  show this help
     \\
     \\Reads the staged diff, proposes a commit message, and commits on confirmation.
-    \\Offers to stage tracked changes when nothing is staged.
+    \\Offers to stage everything when nothing is staged.
     \\Requires OPENAI_API_KEY.
     \\
 ;
@@ -82,19 +82,27 @@ pub fn main() !void {
 
     var diff = try git(alloc, &.{ "git", "diff", "--cached" });
     if (diff.len == 0) {
-        const unstaged = try git(alloc, &.{ "git", "diff", "--stat" });
-        if (unstaged.len == 0) {
-            std.debug.print("nothing to commit. stage changes with `git add`.\n", .{});
+        const changed = try git(alloc, &.{ "git", "diff", "--stat" });
+        // --exclude-standard honours .gitignore, so ignored files never appear
+        // here and `git add -A` below cannot sweep them in.
+        const untracked = try git(alloc, &.{ "git", "ls-files", "--others", "--exclude-standard" });
+
+        if (changed.len == 0 and untracked.len == 0) {
+            std.debug.print("nothing to commit.\n", .{});
             return;
         }
-        std.debug.print("nothing staged, but tracked files have changed:\n\n{s}\n", .{unstaged});
-        if (!confirm("stage all tracked changes?")) {
+
+        std.debug.print("nothing staged. available:\n", .{});
+        if (changed.len > 0) std.debug.print("\n{s}", .{changed});
+        if (untracked.len > 0) std.debug.print("\nuntracked:\n{s}", .{untracked});
+        std.debug.print("\n", .{});
+
+        if (!confirm("stage all and continue?")) {
             std.debug.print("aborted\n", .{});
             return;
         }
-        // -u stages modifications and deletions of tracked files only; new
-        // files stay untracked, which is what the prompt above promised.
-        _ = try git(alloc, &.{ "git", "add", "-u" });
+
+        _ = try git(alloc, &.{ "git", "add", "-A" });
         diff = try git(alloc, &.{ "git", "diff", "--cached" });
         if (diff.len == 0) {
             std.debug.print("nothing staged\n", .{});
